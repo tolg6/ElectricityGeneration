@@ -1,0 +1,582 @@
+---
+title: "ElectricGeneration"
+output: html_document
+date: "2022-07-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+![](https://media.giphy.com/media/1D8pdHo23TNQPLRqkJ/giphy.gif)
+
+
+
+
+__Hello, in this study, we will analyze the amount of electricity (thousandwatt hour) generating from natural gas in the \textcolor{blue}{USA} and \textcolor{red}{New England} state, establish a time series model and make predictions for the next 12 months. :)__
+
+
+* First lets import necessary libraries and import data.
+
+
+```{r,warning=FALSE,message=FALSE}
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(stringr)
+library(kableExtra)
+library(patchwork)
+library(gridExtra)
+library(viridis)
+library(urca)
+library(ggthemes)
+library(lubridate)
+library(forecast)
+
+data = read.csv("/Users/tolgakurt/Downloads/data.csv")
+head(data[,1:20])
+
+```
+### [DATA](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*We have noisy data. We can start by first converting the data into a format we can use.*
+:::
+
+
+![](https://uc-r.github.io/public/images/dataWrangling/gather1.png)
+
+The date variables in the data are in the columns. To get rid of this situation, we can use the gather() function.
+
+
+```{r}
+df1 = gather(data,day,value,Jan.2001:Mar.2022,na.rm = T)
+df1%>%head()
+```
+
+
+
+```{r}
+df1%>%glimpse()
+```
+
+### [](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*We will not use units, sourcekey columns in the data, so we can discard them. We need to convert the value variable to numeric format in character format and since the date variable is in a corrupted structure, let's generate new dates and add them to the data, and get the natural gas generating data related to USA and New England from the new data.*
+:::
+
+
+
+```{r}
+df2 = df1%>%filter(description == "United States : natural gas"|
+                     description == "New England : natural gas")%>%
+  select(-units,-source.key)
+
+
+
+usa_nat_gas = df2[startsWith(df2$description,prefix = "Un")
+                  ,-which(names(df2)%in%c("description"))]%>%
+  mutate(day = seq.Date(from = as.Date("2001-01-01"),
+                        to = as.Date("2022-03-01"),
+                        by = "month"))
+
+eng_nat_gas = df2[startsWith(df2$description,prefix = "Ne"),
+                  -which(names(df2)%in%c("description"))]%>%
+  mutate(day = seq.Date(from = as.Date("2001-01-01"),
+                        to = as.Date("2022-03-01"),
+                        by = "month"))
+
+
+head(df2)
+
+```
+
+* This is the final version of the data we will use. I split this data into two datasets.
+
+
+* Now let's examine the summary statistics of both data.
+
+# Summary Stats USA
+
+```{r}
+usa_nat_gas$value = as.integer(usa_nat_gas$value)
+summary(usa_nat_gas)%>%kable(booktabs = T,caption = "Summary of USA Electricity Generation from Natural Gas")%>%
+  kable_classic(full_width = T,html_font = "Cambria")
+```
+
+# Summary Stats NE
+
+```{r}
+eng_nat_gas$value = as.integer(eng_nat_gas$value)
+summary(eng_nat_gas)%>%kable(booktabs = T,caption = "Summary of New England Electricity Generation from Natural Gas")%>%
+  kable_classic(full_width = T,html_font = "Cambria")
+
+```
+
+### [USA](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*Both datasets start and end on the same dates. USA data is minimum 37967 and maximum 18126. When we examine the mean and medians, there is a difference of about 2000 tWh. We will examine the distribution of the data in the future, but I think it may have a skewed distribution from here as well.*
+:::
+
+### [New England](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*In the New England data, the minimum value is 1658 and the maximum value is 7342. There is a difference of about 150 units between the mean and the median. If we look at it as a ratio, the difference between the mean and the median is less and I think its distribution may be normal. We will check them later!*
+:::
+
+# Data Visualization
+
+```{r,fig.width=17,fig.height=10}
+up1 =ggplot(usa_nat_gas,aes(x = value))+
+  geom_boxplot(color = "red")+
+  labs(title = "USA")+
+  theme_economist()+
+  theme(axis.title.x  = element_blank())
+  
+up2 =ggplot(usa_nat_gas,aes(x = value,y = 1))+
+  geom_violin(color = "red")+
+  coord_flip()+
+  theme_economist()+
+  theme(axis.title.x  = element_blank())
+
+up3 =ggplot(eng_nat_gas,aes(x = value))+
+  geom_boxplot(color = "blue")+
+  ggtitle(label = "NE")+
+  theme_economist_white()+
+  theme(axis.title.x  = element_blank())
+
+up4 =ggplot(eng_nat_gas,aes(x = value,y = 1))+
+  geom_violin(color = "blue")+
+  coord_flip()+
+  theme_economist_white()+
+  theme(axis.title.x  = element_blank())
+
+
+(up1/up2)|(up3/up4)
+
+```
+
+
+
+
+### [Box-Violin Plot](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*When we examine the Violin plot, USA data seems to be gathered between 50k and 100k. In New England there is a rally around 4000-5000 and there are potential outliers in New England.*
+:::
+
+
+```{r,fig.width=17,fig.height=10}
+d1 = ggplot(usa_nat_gas,aes(x = value))+
+  geom_density(fill="#69b3a2")+
+  geom_density(data = eng_nat_gas,
+               aes(x = value),
+               fill = "404080")+
+  theme_minimal()+
+  ggtitle(label = "Usa vs NE Distrubition")
+
+d_usa = ggplot(usa_nat_gas,aes(x = value))+
+  geom_density(fill="#69b3a2")+
+  theme_minimal()+
+  ggtitle(label = "",subtitle = "USA")
+d_eng = ggplot(eng_nat_gas,aes(x = value))+
+  geom_density(fill="#404080")+
+  theme_minimal()+
+  ggtitle(label = "",subtitle = "NE")
+
+d1|(d_usa/d_eng)
+```
+
+
+
+
+
+### [Density Plot](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*As I mentioned above, USA data is skewed and NE data has a closer look to normal and NE data has some extreme values.*
+:::
+
+
+
+```{r,fig.height=10,fig.width=15}
+l1 = ggplot(data = usa_nat_gas,
+       aes(x = day,y = value))+
+  geom_line(color = "red")+
+  theme_minimal()+
+  ggtitle(label = "",
+          subtitle = "USA Electricity Generation from Natural Gas")+
+  geom_smooth(method = "loess")
+
+l2 = ggplot(data = eng_nat_gas,
+       aes(x = day,y = value))+
+  geom_line(color = "blue")+
+  theme_minimal()+
+  ggtitle(label = "",
+          subtitle = "New England Electricity Generation from Natural Gas")+
+  geom_smooth(method = "loess")
+l1/l2
+```
+
+### [Line Plot](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*When we examine the graphs, there is a clear seasonality and an increasing trend in the USA graph, but seasonality is observed in the NE data, but in a stable way.*
+:::
+
+
+
+```{r,fig.width=15,fig.height=10}
+p1 = usa_nat_gas%>%
+  mutate(Month = month(day),
+         Year = year(day))%>%
+  ggplot(aes(x = day,y = value,group = Month,color = Month))+
+  geom_line()+
+  scale_color_viridis(discrete = F)+
+  theme_minimal()+
+  ggtitle(label = "",
+          subtitle = "USA - Electricity Gen. from NG by Month")
+
+b1 = usa_nat_gas%>%
+  mutate(Month = month(day),
+         Year = year(day))%>%
+  group_by(Month)%>%summarise(meanGen = mean(value))%>%
+  ggplot(aes(x = as.character(Month),y = meanGen,fill = Month))+
+  geom_bar(stat = "identity",
+           fill = "slateblue")+
+  ggtitle(label = "",
+          subtitle = "Mean Month Generation - USA")+
+  xlab("Month")+
+  theme_minimal()
+
+p1/b1
+```
+
+* When we examine the USA seasonality and bar graph, there is an increase starting from the 4th month and continuing until the 8th month. On the other hand, seasonality and trend are clearly evident in the seasonality graph.
+
+
+```{r,fig.width=15,fig.height=10}
+p2 = eng_nat_gas%>%
+  mutate(Month = month(day),
+         Year = year(day))%>%
+  ggplot(aes(x = day,y = value,group = Month,color = Month))+
+  geom_line()+
+  scale_color_viridis(discrete = F)+
+  theme_minimal()+
+  ggtitle(label = "",
+          subtitle = "NE - Electricity Gen. from NG by Month")
+
+
+
+b2 = eng_nat_gas%>%
+  mutate(Month = month(day),
+         Year = year(day))%>%
+  group_by(Month)%>%summarise(meanGen = mean(value))%>%
+  ggplot(aes(x = as.character(Month),y = meanGen,fill = Month))+
+  geom_bar(stat = "identity")+
+  ggtitle(label = "",
+          subtitle = "Mean Month Generation - NE")+
+  xlab("Month")+
+  theme_minimal()
+
+p2/b2
+```
+
+* When we examine the seasonality and bar graph, there is an increase starting from the 4th month and continuing until the 7th month. The lowest production is in the 2nd month. Seasonality is clearly evident in the seasonality graph.
+
+
+# Scatter plot
+```{r,fig.width=15,fig.height=10}
+ggplot(data = usa_nat_gas,aes(x = value,
+           y = eng_nat_gas$value))+
+  geom_point()+
+  geom_smooth(method = lm,se = T,level = .95)+
+  scale_color_brewer(palette = "Dark2")+
+  geom_density2d(color = "red")+
+  theme_classic()+
+  ggtitle(label = "",
+          subtitle = "NE - USA")+
+  annotate("text",x = 60000,
+           y = 7000,
+           label = paste0("Linear Correlation : "
+             ,round(cor(
+    usa_nat_gas$value,eng_nat_gas$value),2)%>%as.character()))+
+  xlab("USA")+
+  ylab("New England")
+```
+
+
+
+
+
+
+### [Scatter Plot](https://github.com/markdown-it/markdown-it-container)
+
+::: warning
+*When we examine the scatter plot, we can observe that there is a linear relationship between them. The correlation coefficient between the two variables is 0.56. Then, using the NE data, we can estimate the amount of electricity that will be produced in the USA using natural gas.*
+:::
+
+# Forecasting
+
+After the analysis, we got a few results. Now let's convert them to time series format and start the forecasting process.
+
+```{r,fig.width=15,fig.height=10}
+ts_usa = ts(usa_nat_gas$value,
+             start = c(2001,1),
+             end = c(2022,3),
+             frequency = 12) # Creating ts object for forecast package.
+
+ts_eng = ts(eng_nat_gas$value,
+             start = c(2001,1),
+             end = c(2022,3),
+             frequency = 12) # Creating ts object for forecast package.
+
+
+plot_with = function(ts_object,seasonality,title) # Create function and show acf,pacf and data plot!
+{
+  if(seasonality=="True")
+    {
+      s1 = ggseasonplot(ts_object,size = 1,year.labels = F)+
+        theme_solarized()+
+        theme(legend.position = "none")
+        
+    }
+ 
+  p1 = autoplot(ts_object,color = "red")+
+    xlab("Date")+ylab("MwH")+
+    theme_economist()+
+    theme(legend.position = "none")+
+    ggtitle(title)
+  
+  p2 = ggAcf(ts_object,lag.max = 60,size = 1)+
+    xlab("Lag")+ylab("Autocorrelation")+
+    theme_minimal()+
+    ggtitle("Autocorrelation")
+  
+  p3 = ggPacf(ts_object,lag.max = 60,size = 1)+
+    xlab("Lag")+ylab("Autocorrelation")+
+    theme_minimal()+
+    ggtitle("Partial Autocorrelation")
+  
+  if(seasonality == "True")
+  {
+    return(grid.arrange(p1,s1,arrangeGrob(p2,p3,ncol = 2)))
+  }else
+  {
+    return(grid.arrange(p1,arrangeGrob(p2,p3,ncol = 2)))
+  }
+    
+  
+}
+
+plot_with(ts_object = ts_usa,seasonality = "True",
+          title = "USA Monthly Electric Generation - Natural Gas - 2001 to 2022")
+```
+
+
+
+
+*As can be seen from the graph, there is autocorrelation. The good news is we can model the data.We can also observe this result with statistical tests.
+
+
+
+
+```{r}
+Box.test(ts_usa,type = "Box-Pierce")
+```
+
+
+
+
+
+*p value <0.05 , H0 hypothesis rejected, USA data not fit white noise series.
+
+
+
+
+```{r,fig.width=15,fig.height=10}
+plot_with(ts_object = ts_eng,
+          seasonality = "True",
+          title = "NE Monthly Electric Generation - Natural Gas - 2001 to 2022")
+```
+
+```{r}
+Box.test(ts_eng,type = "Box-Pierce")
+```
+
+p value <0.05 , H0 hypothesis rejected, NE data not fit white noise series.
+
+
+# Arima & Sarima Process
+
+## Stationary
+
+*To make our data suitable for the arima process, we must first have static data. Let's run the following function to check this.
+
+```{r}
+
+is_stationary = function(data)
+{
+  adf_test = ur.df(data,selectlags = "AIC")
+  c_vals = attr(adf_test,"cval")[2]
+  test_stat = attr(adf_test,"teststat")
+  ifelse(sum(test_stat>c_vals),yes = print("Series is not stationary"),
+         no = print("Series is stationary"))
+}
+
+is_stationary(ts_usa)
+
+```
+
+*Since the series is not stationary, let's take the 1st difference and try again. If the 1st difference finally turns out to be stationary, we will set the d parameter in the Arima model to 1.
+
+```{r}
+is_stationary(diff(ts_usa))
+```
+
+```{r}
+is_stationary(ts_eng)
+is_stationary(diff(ts_eng))
+```
+
+*and yes, the series became stationary after taking the 1st difference of both series.
+* Now let's visualize the stationary data and decide for other parameters.
+
+```{r,fig.width=15,fig.height=10}
+plot_with(diff(ts_usa,1),
+          seasonality = "False",
+          title = "Usa Data with 1 Difference")
+
+plot_with(diff(ts_eng,1),
+          seasonality = "False",
+          title = "Eng Data with 1 Difference")
+```
+
+# Arima for USA
+```{r,fig.width=15,fig.height=10}
+train = window(ts_usa,
+               end = c(2020,12))
+test = window(ts_usa,
+              start = c(2021,1))
+
+
+model_usa = model_usa = Arima(train,order = c(6,1,2),
+                              seasonal = c(0,1,0),
+                              lambda = "auto")
+model_usa
+fcast = forecast(model_usa,
+                 h = length(test))
+accuracy(test,fcast$mean)
+
+autoplot(test)+
+  autolayer(fcast$mean,series = "Forecast")+
+  theme_classic()
+  
+
+```
+
+* I will use the MAE metric in the forecast results. According to the Arima(6,1,2)(0,1,1) model, mae was obtained as 6648. According to the forecast results, our forecasts can catch the seasonal pattern.
+
+
+# Arima for NE
+```{r,fig.width=15,fig.height=10}
+train_eng = window(ts_eng,
+               end = c(2020,12))
+test_eng = window(ts_eng,
+              start = c(2021,1))
+
+
+model_eng = auto.arima(train_eng,
+                       d = 1,
+                       start.p = 3,
+                       start.q = 3,
+                       seasonal = T,
+                       stepwise = F,
+                       approximation = F,
+                       trace = F)
+fcast = forecast(model_eng,
+                 h = length(test))
+accuracy(test_eng,fcast$mean)
+
+autoplot(test_eng)+
+  autolayer(fcast$mean,series = "Forecast")+
+  theme_classic()
+
+
+```
+
+*Likewise, according to the result of the Arima model for NE data, mae: 401 was obtained. As in the first model, we can catch the seasonal pattern.
+
+
+# Usa with NE exogenus
+```{r,fig.width=15,fig.height=10}
+model_usa_exog = Arima(train,
+                       order = c(6,1,2),
+                       seasonal = c(0,1,0),
+                       xreg = train_eng)
+
+fcast = forecast(model_usa_exog,
+                 h = length(test),
+                  xreg = test_eng)
+accuracy(test,fcast$mean)
+
+autoplot(test)+
+  autolayer(fcast$mean,series = "Forecast")+
+  theme_classic()
+
+```
+
+
+
+
+
+*When we added the NE data as an argument, it was found as mae : 6209. We achieved a success of 400 units in MAE.
+
+# Future Forecasting 
+
+*Now let's model the created model with all the data and predict the production for the next 12 months.
+
+```{r,fig.width=15,fig.height=10}
+model_eng = Arima(ts_eng,
+                  order = c(2,1,2),
+                  seasonal = c(0,1,1),
+                  lambda = "auto")
+# 12 m forecast
+fcast_eng = forecast(model_eng,
+                     h = 12)
+
+mod = Arima(ts_usa,xreg = ts_eng,
+            order = c(6,1,2),
+            seasonal = c(0,1,0))
+
+checkresiduals(mod)
+
+```
+
+*When we examine the residuals of the established main model, the residuals do not fit the white noise series, which is an undesirable situation. However, the distribution of residuals is normally distributed.
+
+*And now let's predict the next 12 months.
+
+```{r,fig.width=15,fig.height=10}
+fcast_usa_exog = forecast(mod,
+                          h = length(fcast_eng),
+                          xreg = fcast_eng$mean)
+autoplot(fcast_usa_exog$mean,series = "Forecast")+
+  autolayer(ts_usa,series = "USA Data")+
+  ylab("tWh")
+
+```
+
+*!Thank you for reading! Don't forget to vote if you found it helpful!
+
+
+![](https://media.giphy.com/media/fxe8v45NNXFd4jdaNI/giphy.gif)
+
+
+
+
+
+
