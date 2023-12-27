@@ -41,7 +41,7 @@ head(data[,1:20])
 ### [DATA](https://github.com/markdown-it/markdown-it-container)
 
 ::: warning
-*We have noisy data. We can start by first converting the data into a format we can use.*
+*We have noisy dta. We can start by first converting the data into a format we can use.*
 :::
 
 
